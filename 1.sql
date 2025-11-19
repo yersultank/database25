@@ -1,93 +1,303 @@
-BEGIN TRANSACTION;
-CREATE OR REPLACE VIEW employee_details AS SELECT e.emp_id emp_id,e.emp_name emp_name,e.salary salary,d.dept_name dept_name,d.location location FROM employees e JOIN departments d ON e.dept_id=d.dept_id;
-CREATE OR REPLACE VIEW dept_statistics AS SELECT d.dept_id dept_id,d.dept_name dept_name,COUNT(e.emp_id) employee_count,COALESCE(ROUND(AVG(e.salary)::numeric,2),0) average_salary,COALESCE(MAX(e.salary),0) max_salary,COALESCE(MIN(e.salary),0) min_salary FROM departments d LEFT JOIN employees e ON d.dept_id=e.dept_id GROUP BY d.dept_id,d.dept_name;
-CREATE OR REPLACE VIEW project_overview AS SELECT p.project_id project_id,p.project_name project_name,p.budget budget,d.dept_name dept_name,d.location location,COUNT(e.emp_id) FILTER (WHERE e.dept_id=d.dept_id) team_size FROM projects p JOIN departments d ON p.dept_id=d.dept_id LEFT JOIN employees e ON e.dept_id=d.dept_id GROUP BY p.project_id,p.project_name,p.budget,d.dept_name,d.location;
-CREATE OR REPLACE VIEW high_earners AS SELECT e.emp_id emp_id,e.emp_name emp_name,e.salary salary,d.dept_name dept_name FROM employees e JOIN departments d ON e.dept_id=d.dept_id WHERE e.salary>55000;
-ALTER VIEW high_earners RENAME TO top_performers;
-CREATE TEMP VIEW temp_view AS SELECT emp_id,emp_name,dept_id,salary FROM employees WHERE salary<50000;
-DROP VIEW IF EXISTS temp_view;
-CREATE OR REPLACE VIEW employee_salaries AS SELECT emp_id,emp_name,dept_id,salary FROM employees WITH LOCAL CHECK OPTION;
-UPDATE employee_salaries SET salary=52000 WHERE emp_name='John Smith';
-INSERT INTO employee_salaries(emp_id,emp_name,dept_id,salary) VALUES (6,'Alice Johnson',102,58000);
-CREATE OR REPLACE VIEW it_employees AS SELECT emp_id,emp_name,dept_id,salary FROM employees WHERE dept_id=101 WITH LOCAL CHECK OPTION;
-INSERT INTO it_employees(emp_id,emp_name,dept_id,salary) VALUES (7,'Bob Wilson',103,60000);
-CREATE MATERIALIZED VIEW dept_summary_mv AS SELECT d.dept_id dept_id,d.dept_name dept_name,COUNT(e.emp_id) total_employees,COALESCE(SUM(e.salary),0) total_salaries,COUNT(p.project_id) total_projects,COALESCE(SUM(p.budget),0) total_project_budget FROM departments d LEFT JOIN employees e ON d.dept_id=e.dept_id LEFT JOIN projects p ON d.dept_id=p.dept_id GROUP BY d.dept_id,d.dept_name WITH DATA;
-SELECT * FROM dept_summary_mv ORDER BY total_employees DESC;
-INSERT INTO employees(emp_id,emp_name,dept_id,salary) VALUES (8,'Charlie Brown',101,54000);
-SELECT * FROM dept_summary_mv ORDER BY total_employees DESC;
-REFRESH MATERIALIZED VIEW dept_summary_mv;
-SELECT * FROM dept_summary_mv ORDER BY total_employees DESC;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_dept_summary_mv_dept_id ON dept_summary_mv(dept_id);
-REFRESH MATERIALIZED VIEW CONCURRENTLY dept_summary_mv;
-CREATE MATERIALIZED VIEW project_stats_mv WITH NO DATA AS SELECT p.project_id project_id,p.project_name project_name,p.budget budget,d.dept_name dept_name,COUNT(e.emp_id) assigned_employee_count FROM projects p JOIN departments d ON p.dept_id=d.dept_id LEFT JOIN employees e ON e.dept_id=d.dept_id GROUP BY p.project_id,p.project_name,p.budget,d.dept_name;
-SELECT * FROM project_stats_mv;
-REFRESH MATERIALIZED VIEW project_stats_mv;
-CREATE ROLE analyst NOLOGIN;
-CREATE ROLE data_viewer LOGIN PASSWORD 'viewer123';
-CREATE ROLE report_user LOGIN PASSWORD 'report456';
-CREATE ROLE db_creator LOGIN PASSWORD 'creator789' CREATEDB;
-CREATE ROLE user_manager LOGIN PASSWORD 'manager101' CREATEROLE;
-CREATE ROLE admin_user LOGIN PASSWORD 'admin999' SUPERUSER;
-GRANT SELECT ON employees,departments,projects TO analyst;
-GRANT ALL PRIVILEGES ON employee_details TO data_viewer;
-GRANT SELECT,INSERT ON employees TO report_user;
-CREATE ROLE hr_team NOLOGIN;
-CREATE ROLE finance_team NOLOGIN;
-CREATE ROLE it_team NOLOGIN;
-CREATE ROLE hr_user1 LOGIN PASSWORD 'hr001';
-CREATE ROLE hr_user2 LOGIN PASSWORD 'hr002';
-CREATE ROLE finance_user1 LOGIN PASSWORD 'fin001';
-GRANT hr_team TO hr_user1;
-GRANT hr_team TO hr_user2;
-GRANT finance_team TO finance_user1;
-GRANT SELECT,UPDATE ON employees TO hr_team;
-GRANT SELECT ON dept_statistics TO finance_team;
-REVOKE UPDATE ON employees FROM hr_team;
-REVOKE hr_team FROM hr_user2;
-REVOKE ALL PRIVILEGES ON employee_details FROM data_viewer;
-ALTER ROLE analyst WITH LOGIN PASSWORD 'analyst123';
-ALTER ROLE user_manager WITH SUPERUSER;
-ALTER ROLE analyst WITH PASSWORD NULL;
-ALTER ROLE data_viewer WITH CONNECTION LIMIT 5;
-CREATE ROLE read_only NOLOGIN;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO read_only;
-CREATE ROLE junior_analyst LOGIN PASSWORD 'junior123';
-CREATE ROLE senior_analyst LOGIN PASSWORD 'senior123';
-GRANT read_only TO junior_analyst;
-GRANT read_only TO senior_analyst;
-GRANT INSERT,UPDATE ON employees TO senior_analyst;
-CREATE ROLE project_manager LOGIN PASSWORD 'pm123';
-ALTER VIEW dept_statistics OWNER TO project_manager;
-ALTER TABLE projects OWNER TO project_manager;
-CREATE ROLE temp_owner LOGIN;
-CREATE TABLE IF NOT EXISTS temp_table(id INT);
-ALTER TABLE temp_table OWNER TO temp_owner;
-REASSIGN OWNED BY temp_owner TO postgres;
-DROP OWNED BY temp_owner;
-DROP ROLE IF EXISTS temp_owner;
-CREATE OR REPLACE VIEW hr_employee_view AS SELECT emp_id,emp_name,dept_id,salary FROM employees WHERE dept_id=102;
-GRANT SELECT ON hr_employee_view TO hr_team;
-CREATE OR REPLACE VIEW finance_employee_view AS SELECT emp_id,emp_name,salary FROM employees;
-GRANT SELECT ON finance_employee_view TO finance_team;
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-CREATE OR REPLACE VIEW dept_dashboard AS SELECT d.dept_name dept_name,d.location location,COUNT(e.emp_id) employee_count,COALESCE(ROUND(AVG(e.salary)::numeric,2),0) average_salary,COUNT(p.project_id) FILTER (WHERE p.project_id IS NOT NULL) active_projects,COALESCE(SUM(p.budget),0) total_project_budget,COALESCE(ROUND((CASE WHEN COUNT(e.emp_id)=0 THEN 0 ELSE SUM(p.budget)::numeric/NULLIF(COUNT(e.emp_id),0) END)::numeric,2),0) budget_per_employee FROM departments d LEFT JOIN employees e ON d.dept_id=e.dept_id LEFT JOIN projects p ON d.dept_id=p.dept_id GROUP BY d.dept_name,d.location;
-ALTER TABLE projects ADD COLUMN IF NOT EXISTS created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
-CREATE OR REPLACE VIEW high_budget_projects AS SELECT p.project_id project_id,p.project_name project_name,p.budget budget,d.dept_name dept_name,p.created_date created_date,CASE WHEN p.budget>150000 THEN 'Critical Review Required' WHEN p.budget>100000 THEN 'Management Approval Needed' ELSE 'Standard Process' END approval_status FROM projects p JOIN departments d ON p.dept_id=d.dept_id WHERE p.budget>75000;
-CREATE ROLE viewer_role NOLOGIN;
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO viewer_role;
-CREATE ROLE entry_role NOLOGIN;
-GRANT viewer_role TO entry_role;
-GRANT INSERT ON employees,projects TO entry_role;
-CREATE ROLE analyst_role NOLOGIN;
-GRANT entry_role TO analyst_role;
-GRANT UPDATE ON employees,projects TO analyst_role;
-CREATE ROLE manager_role NOLOGIN;
-GRANT analyst_role TO manager_role;
-GRANT DELETE ON employees,projects TO manager_role;
-CREATE ROLE alice LOGIN PASSWORD 'alice123';
-CREATE ROLE bob LOGIN PASSWORD 'bob123';
-CREATE ROLE charlie LOGIN PASSWORD 'charlie123';
-GRANT viewer_role TO alice;
-GRANT analyst_role TO bob;
-GRANT manager_role TO charlie;
-COMMIT;
+--lab8
+-- 1. Setup: tables and data
+DROP TABLE IF EXISTS projects;
+DROP TABLE IF EXISTS employees;
+DROP TABLE IF EXISTS departments;
+
+CREATE TABLE departments (
+    dept_id   INT PRIMARY KEY,
+    dept_name VARCHAR(50),
+    location  VARCHAR(50)
+);
+
+CREATE TABLE employees (
+    emp_id   INT PRIMARY KEY,
+    emp_name VARCHAR(100),
+    dept_id  INT,
+    salary   DECIMAL(10,2),
+    FOREIGN KEY (dept_id) REFERENCES departments(dept_id)
+);
+
+CREATE TABLE projects (
+    proj_id   INT PRIMARY KEY,
+    proj_name VARCHAR(100),
+    budget    DECIMAL(12,2),
+    dept_id   INT,
+    FOREIGN KEY (dept_id) REFERENCES departments(dept_id)
+);
+
+INSERT INTO departments VALUES
+(101, 'IT',         'Building A'),
+(102, 'HR',         'Building B'),
+(103, 'Operations', 'Building C');
+
+INSERT INTO employees VALUES
+(1, 'John Smith',      101, 50000),
+(2, 'Jane Doe',        101, 55000),
+(3, 'Mike Johnson',    102, 48000),
+(4, 'Sarah Williams',  102, 52000),
+(5, 'Tom Brown',       103, 60000);
+
+INSERT INTO projects VALUES
+(201, 'Website Redesign',    75000, 101),
+(202, 'Database Migration', 120000, 101),
+(203, 'HR System Upgrade',   50000, 102);
+
+-- 2.1 Simple B-tree index
+CREATE INDEX emp_salary_idx ON employees(salary);
+
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE tablename = 'employees';
+
+-- 2.2 Index on foreign key
+CREATE INDEX emp_dept_idx ON employees(dept_id);
+
+SELECT * FROM employees WHERE dept_id = 101;
+
+-- 2.3 View all indexes in public schema
+SELECT
+    tablename,
+    indexname,
+    indexdef
+FROM pg_indexes
+WHERE schemaname = 'public'
+ORDER BY tablename, indexname;
+
+--PART 3
+--3.1
+
+CREATE INDEX emp_dept_salary_idx ON employees(dept_id, salary);
+
+SELECT emp_name, salary
+FROM employees
+WHERE dept_id = 101 AND salary > 52000;
+
+-- Would this index be useful for a query that only filters by
+-- salary (without dept_id)? Why or why not?
+
+--No, the index (dept_id, salary)
+-- would NOT be useful for a query that filters only by salary.
+-- A multicolumn index works from left to right, meaning PostgreSQL
+-- can use the index only if the first column (dept_id) is included
+-- in the WHERE clause. If the query does not filter by the first
+-- column, the index cannot be used efficiently.
+
+--3.2
+CREATE INDEX emp_salary_dept_idx ON employees(salary, dept_id);
+
+SELECT * FROM employees
+WHERE dept_id = 102 AND salary > 50000;
+
+SELECT * FROM employees
+WHERE salary > 50000 AND dept_id = 102;
+
+--Does the order of columns in a multicolumn index matter? Explain.
+--Yes, the order of columns in a multicolumn index definitely matters.
+-- PostgreSQL uses the index based on the order of the columns: it first
+-- sorts by the first column, and then by the second. Therefore, the first column
+-- must appear in the query’s WHERE clause for the index to be used. An index on
+-- (dept_id, salary) is useful for queries filtering by dept_id, while an index on
+-- (salary, dept_id) is useful for queries filtering by salary.
+
+
+--PART 4
+ALTER TABLE employees ADD COLUMN email VARCHAR(100);
+
+UPDATE employees SET email = 'john.smith@company.com' WHERE emp_id = 1;
+UPDATE employees SET email = 'jane.doe@company.com' WHERE emp_id = 2;
+UPDATE employees SET email = 'mike.johnson@company.com' WHERE emp_id = 3;
+UPDATE employees SET email = 'sarah.williams@company.com' WHERE emp_id = 4;
+UPDATE employees SET email = 'tom.brown@company.com' WHERE emp_id = 5;
+
+CREATE UNIQUE INDEX emp_email_unique_idx ON employees(email);
+
+INSERT INTO employees (emp_id, emp_name, dept_id, salary, email)
+VALUES (6, 'New Employee', 101, 55000, 'john.smith@company.com');
+-- INSERT INTO employees (emp_id, emp_name, dept_id, salary, email)
+-- VALUES (6, 'New Employee', 101, 55000, 'new.employee@company.com');
+
+
+--What error message did you receive?
+--WE will receive a unique constraint violation error.
+--This happens because a unique index does not allow two rows to have the same value in the email column.
+
+--4.2
+ALTER TABLE employees ADD COLUMN phone VARCHAR(20) UNIQUE;
+
+SELECT indexname, indexdef
+FROM pg_indexes
+WHERE tablename = 'employees' AND indexname LIKE '%phone%';
+
+--Did PostgreSQL automatically create an index? What type of index?
+--Yes, PostgreSQL automatically created an index for the phone column.
+-- The index type is a B-tree unique index, which is the default index type used
+-- for enforcing UNIQUE constraints.
+
+--PART 5
+
+CREATE INDEX emp_salary_desc_idx ON employees(salary DESC);
+
+SELECT emp_name, salary
+FROM employees
+ORDER BY salary DESC;
+--How does this index help with ORDER BY queries?
+--The index helps because it is already sorted in descending order by salary.
+-- When PostgreSQL executes ORDER BY salary DESC, it can read the values directly from
+-- the index instead of sorting the data manually. This makes the query faster, especially
+-- on large tables.
+
+--5.2
+CREATE INDEX proj_budget_nulls_first_idx
+ON projects(budget NULLS FIRST);
+
+SELECT proj_name, budget
+FROM projects
+ORDER BY budget NULLS FIRST;
+
+--PART 6
+CREATE INDEX emp_name_lower_idx ON employees(LOWER(emp_name));
+
+SELECT * FROM employees
+WHERE LOWER(emp_name) = 'john smith';
+
+--Without this index, how would PostgreSQL search?
+-- PostgreSQL would apply LOWER() to every row and do a full table scan,
+-- because normal indexes cannot be used when a function is applied.
+
+--6.2
+ALTER TABLE employees ADD COLUMN hire_date DATE;
+
+UPDATE employees SET hire_date = '2020-01-15' WHERE emp_id = 1;
+UPDATE employees SET hire_date = '2019-06-20' WHERE emp_id = 2;
+UPDATE employees SET hire_date = '2021-03-10' WHERE emp_id = 3;
+UPDATE employees SET hire_date = '2020-11-05' WHERE emp_id = 4;
+UPDATE employees SET hire_date = '2018-08-25' WHERE emp_id = 5;
+
+CREATE INDEX emp_hire_year_idx
+ON employees(EXTRACT(YEAR FROM hire_date));
+
+SELECT emp_name, hire_date
+FROM employees
+WHERE EXTRACT(YEAR FROM hire_date) = 2020;
+
+
+--PART 7
+-- 7.1 Rename index
+ALTER INDEX emp_salary_idx RENAME TO employees_salary_index;
+
+SELECT indexname FROM pg_indexes
+WHERE tablename='employees';
+
+-- 7.2 Drop index
+DROP INDEX emp_salary_dept_idx;
+
+-- Q: Why drop an index?
+-- A: To reduce overhead if the index is unused or duplicated.
+
+-- 7.3 Reindex
+REINDEX INDEX employees_salary_index;
+
+-- Q: When is REINDEX useful?
+-- A: After bulk inserts, major updates, or index bloat.
+
+-- PART 8
+
+-- 8.1 Optimize frequent query
+CREATE INDEX emp_salary_filter_idx
+ON employees(salary)
+WHERE salary > 50000;
+
+-- emp_dept_idx already exists
+-- emp_salary_desc_idx already created
+
+
+-- 8.2 Partial index
+CREATE INDEX proj_high_budget_idx
+ON projects(budget)
+WHERE budget > 80000;
+
+SELECT proj_name, budget
+FROM projects
+WHERE budget > 80000;
+
+-- Q: Advantage of partial index?
+-- A: Smaller, faster, applied only to frequently queried subset.
+
+
+-- 8.3 Analyze index usage
+EXPLAIN SELECT * FROM employees WHERE salary > 52000;
+
+-- Q: Index Scan or Seq Scan?
+-- A: If it shows Index Scan → the index is used.
+--    If Seq Scan → PostgreSQL decided index was not efficient.
+
+-- PART 9
+
+-- 9.1 Hash index
+CREATE INDEX dept_name_hash_idx
+ON departments USING HASH (dept_name);
+
+SELECT * FROM departments WHERE dept_name = 'IT';
+
+-- Q: When use HASH index?
+-- A: For equality (=) comparisons only. Not for range queries.
+
+
+-- 9.2
+CREATE INDEX proj_name_btree_idx ON projects(proj_name);
+CREATE INDEX proj_name_hash_idx ON projects USING HASH (proj_name);
+
+SELECT * FROM projects WHERE proj_name = 'Website Redesign';
+
+SELECT * FROM projects WHERE proj_name > 'Database';
+
+-- PART 10
+
+-- 10.1 Index sizes
+SELECT schemaname, tablename, indexname,
+       pg_size_pretty(pg_relation_size(indexname::regclass)) AS index_size
+FROM pg_indexes
+WHERE schemaname='public'
+ORDER BY tablename, indexname;
+
+-- Q: Which index is largest? Why?
+-- A: Usually the index on the largest table or widest column.
+
+
+-- 10.2 Drop unnecessary index
+DROP INDEX IF EXISTS proj_name_hash_idx;
+
+
+-- 10.3 Document indexes
+CREATE VIEW index_documentation AS
+SELECT tablename, indexname, indexdef,
+       'Improves salary-based queries' AS purpose
+FROM pg_indexes
+WHERE schemaname='public'
+  AND indexname LIKE '%salary%';
+
+SELECT * FROM index_documentation;
+
+
+-- 1. Default index type?
+--    Answer: B-tree.
+
+-- 2. When should you create an index?
+--    Answer:
+--      - Columns used in WHERE
+--      - JOIN columns
+--      - Columns used in ORDER BY
+--      - Columns frequently filtered
+
+-- 3. When NOT to create an index?
+--    Answer:
+--      - Very small tables
+--      - Columns rarely filtered
+
+-- 4. What happens on INSERT/UPDATE/DELETE?
+--    Answer: Indexes must also update → extra overhead.
+
+-- 5. How to check index usage?
+--    Answer: Use EXPLAIN or EXPLAIN ANALYZE.
+
